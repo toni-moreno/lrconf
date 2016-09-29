@@ -1,0 +1,8 @@
+[general]
+ logdir = "./log"
+ loglevel = "debug"
+
+[server]
+  centralconfigserver = "localhost"
+  centralconfigport = 1234
+  reloadconfig = 60
