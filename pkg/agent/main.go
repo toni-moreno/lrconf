@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -37,8 +38,15 @@ type Config struct {
 }
 
 var (
-	log = logrus.New()
+	version    string
+	commit     string
+	branch     string
+	buildstamp string
+)
 
+var (
+	log        = logrus.New()
+	getversion bool
 	appdir     = os.Getenv("PWD")
 	logDir     = filepath.Join(appdir, "log")
 	confDir    = filepath.Join(appdir, "conf")
@@ -53,7 +61,7 @@ func fatal(v ...interface{}) {
 
 func flags() *flag.FlagSet {
 	var f flag.FlagSet
-
+	f.BoolVar(&getversion, "version", getversion, "display de version")
 	f.StringVar(&configFile, "config", configFile, "config file")
 	f.StringVar(&logDir, "logs", logDir, "log directory")
 	f.Usage = func() {
@@ -77,12 +85,16 @@ func init() {
 	log.Formatter = customFormatter
 	customFormatter.FullTimestamp = true
 
-	//
-	log.Printf("set Default directories : \n   - Exec: %s\n   - Config: %s\n   -Logs: %s\n", appdir, confDir, logDir)
-
 	// parse first time to see if config file is being specified
 	f := flags()
 	f.Parse(os.Args[1:])
+
+	if getversion {
+		fmt.Printf("lrconf-agent v%s (git: %s ) built at [%s]\n", version, commit, branch)
+		os.Exit(0)
+	}
+	//
+	log.Printf("set Default directories : \n   - Exec: %s\n   - Config: %s\n   -Logs: %s\n", appdir, confDir, logDir)
 	// now load up config settings
 	viper.Set("Verbose", true)
 	viper.Set("LogFile", "./log/viper.log")
@@ -94,22 +106,34 @@ func init() {
 		log.Info("set default config files")
 
 		viper.SetConfigName("lrconf-agent")
-		viper.AddConfigPath("/opt/lrconf/conf/")
-		viper.AddConfigPath("./conf/")
-		viper.AddConfigPath(".")
+		tmpdir := filepath.Join(os.TempDir(), "lrconf-agent")
+		//first dir to seach for is the temporal runtime path if have been previously downloaded and after stopped
+		viper.AddConfigPath(tmpdir)
+		switch runtime.GOOS {
+		case "linux":
+			viper.AddConfigPath("/opt/lrconf/conf/")
+			viper.AddConfigPath("./conf/")
+			viper.AddConfigPath(".")
+		case "windows":
+			viper.AddConfigPath("C:\\Program Files\\lrconf-agent\\conf\\")
+			viper.AddConfigPath(".")
+		}
 
 	}
 	err := viper.ReadInConfig()
 	if err != nil {
-		panic(fmt.Errorf("Fatal error config file: %s \n", err))
+		log.Errorf("Fatal error config file: %s ", err)
+		os.Exit(1)
 	}
 	//Allocating Config struct
 	cfg = new(Config)
 	cfg.InitConfig()
 	err = viper.Unmarshal(cfg)
 	if err != nil {
-		panic(fmt.Errorf("unable to decode into struct, %v \n", err))
+		log.Errorf("unable to decode into struct, %s ", err)
+		os.Exit(1)
 	}
+	cfg.EndConfig()
 
 	//LOG SETTINGS
 
@@ -154,6 +178,14 @@ func (c *Config) InitConfig() {
 	os.Mkdir(cfg.tmpdir, 0755)
 }
 
+//EndConfig default values
+func (c *Config) EndConfig() {
+	//set checkid for each check
+	for key, val := range c.CheckFiles {
+		val.CheckID = key
+	}
+}
+
 //DownloadNew to download the new version of this file
 func (c *Config) downloadMainConf() (string, error) {
 	log.Debugf("Download new config file from server..")
@@ -177,18 +209,19 @@ func CheckFiles(wg *sync.WaitGroup, cfg *Config) {
 		if newconf, err := cfg.downloadMainConf(); err == nil {
 			//download OK
 			viper.SetConfigFile(newconf)
-			err := viper.ReadInConfig()
+			verr := viper.ReadInConfig()
 			var newCfg *Config
-			if err != nil {
-				log.Errorf("Fatal error config file: %s \n", err)
+			if verr != nil {
+				log.Errorf("Fatal error config file: %s \n", verr)
 			} else {
 				newCfg = new(Config)
-				err = viper.Unmarshal(newCfg)
-				if err != nil {
-					log.Warnf("ERROR unable to decode into struct, %v \n", err)
+				newCfg.InitConfig()
+				verr = viper.Unmarshal(newCfg)
+				if verr != nil {
+					log.Warnf("ERROR unable to decode into struct, %v \n", verr)
 				} else {
 					cfg = newCfg
-					cfg.InitConfig()
+					cfg.EndConfig()
 					log.Infof("Config Successfully reloaded !!")
 					Freq2 := cfg.Server.ReloadConfig
 					if Freq != Freq2 {
@@ -199,6 +232,8 @@ func CheckFiles(wg *sync.WaitGroup, cfg *Config) {
 				}
 			}
 			log.Debugf("DATA:%+v", cfg)
+		} else {
+			log.Warningf(" I can not download the agent conf from remoteserver: %s", err)
 		}
 		//Check Main Process after config reload
 		for id, f := range cfg.CheckFiles {
@@ -210,7 +245,7 @@ func CheckFiles(wg *sync.WaitGroup, cfg *Config) {
 				f.DownloadNew(cfg.NodeID, cfg.Server)
 				f.ExecReload()
 				f.ExecCheck()
-				f.UploadLog(cfg.NodeID)
+				f.UploadLog(cfg.NodeID, cfg.Server)
 				continue
 			}
 			lastsum, modified := f.IsModified()
@@ -220,7 +255,7 @@ func CheckFiles(wg *sync.WaitGroup, cfg *Config) {
 				f.DownloadNew(cfg.NodeID, cfg.Server)
 				f.ExecReload()
 				f.ExecCheck()
-				f.UploadLog(cfg.NodeID)
+				f.UploadLog(cfg.NodeID, cfg.Server)
 			}
 		}
 	LOOP:
@@ -241,6 +276,5 @@ func main() {
 	log.Debug("Init main")
 	wg.Add(1)
 	go CheckFiles(&wg, cfg)
-	//go CheckFiles(&wg, cfg.CheckFiles, cfg.Server.ReloadConfig)
 	wg.Wait()
 }

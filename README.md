@@ -28,7 +28,6 @@ go get github.com/toni-moreno/lrconf
 ```
 
 ### Building
-Replace X.Y.Z by actual version number.
 ```
 cd $GOPATH/src/github.com/toni-moreno/lrconf
 make

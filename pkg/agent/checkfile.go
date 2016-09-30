@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"os/exec"
@@ -10,6 +11,7 @@ import (
 	"errors"
 	"io"
 	"io/ioutil"
+	"mime/multipart"
 	"net/http"
 	"strconv"
 	"time"
@@ -30,6 +32,7 @@ upload_file_after_cmd= "/opt/collectd/logs/collectd.log"
 
 /*CheckFileConfig  is type for file checking*/
 type CheckFileConfig struct {
+	CheckID            string
 	FilePath           string `toml:"file_path"`
 	FileSum            string `toml:"file_sum"`
 	FileOwner          string `toml:"file_owner"`
@@ -42,8 +45,60 @@ type CheckFileConfig struct {
 //private basic methods for upload/download files from Server
 
 //https://matt.aimonetti.net/posts/2013/07/01/golang-multipart-file-upload-example/
-func (f *CheckFileConfig) uploadFile() error {
-	log.Debugf("Doing uploading file... for file: %s", f.FilePath)
+
+func newfileUploadRequest(uri string, params map[string]string, paramName, path string) (*http.Request, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+
+	body := &bytes.Buffer{}
+	writer := multipart.NewWriter(body)
+	part, err := writer.CreateFormFile(paramName, filepath.Base(path))
+	if err != nil {
+		return nil, err
+	}
+	_, err = io.Copy(part, file)
+
+	for key, val := range params {
+		_ = writer.WriteField(key, val)
+	}
+	err = writer.Close()
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("POST", uri, body)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	return req, err
+}
+
+func uploadFile(rawURL string, path string, extraParams map[string]string) error {
+	log.Debugf("Doing uploading file... for file: %s", path)
+
+	request, err := newfileUploadRequest(rawURL, extraParams, "file", path)
+	if err != nil {
+		log.Error(err)
+		return err
+	}
+	client := &http.Client{}
+	resp, err := client.Do(request)
+	if err != nil {
+		log.Error(err)
+		return err
+	}
+
+	body := &bytes.Buffer{}
+	_, err = body.ReadFrom(resp.Body)
+	if err != nil {
+		log.Error(err)
+	}
+	resp.Body.Close()
+	log.Debugf("UPLOAD STATUS CODE: %v", resp.StatusCode)
+	log.Debugf("UPLOAD RESP HEADER: %v", resp.Header)
+	log.Debugf("UPLOAD BODY: %v", body)
+
 	return nil
 }
 
@@ -53,13 +108,6 @@ func downloadFile(rawURL string, dest string) error {
 	//dirname := filepath.Dir(dest)
 
 	//tmpfile := filepath.Join(os.TempDir(), basename)
-	file, err := os.Create(dest)
-	log.Debugf("New File created at: %s", dest)
-	if err != nil {
-		fmt.Println(err)
-		panic(err)
-	}
-	defer file.Close()
 
 	//http redirect detection
 	check := http.Client{
@@ -72,13 +120,24 @@ func downloadFile(rawURL string, dest string) error {
 	resp, err := check.Get(rawURL)
 	if err != nil {
 		log.Errorln(err)
+		return err
 	}
 	defer resp.Body.Close()
+
 	log.Infof("Download Status %s", resp.Status)
 	if resp.Status != "200 OK" {
 		log.Errorf("Error on download File %s [ERROR: %s]", rawURL, resp.Status)
 		return errors.New("Error on download " + resp.Status)
 	}
+
+	file, err := os.Create(dest)
+	log.Debugf("New File created at: %s", dest)
+	if err != nil {
+		fmt.Println(err)
+		panic(err)
+	}
+	defer file.Close()
+
 	size, err := io.Copy(file, resp.Body)
 
 	if err != nil {
@@ -176,14 +235,26 @@ func (f *CheckFileConfig) IsModified() (string, bool) {
 func (f *CheckFileConfig) DownloadNew(nodeid string, server ServerConfig) error {
 	log.Debugf("Download new file version from server... for file: %s", f.FilePath)
 	basename := filepath.Base(f.FilePath)
-	rawURL := "http://" + server.CentralConfigServer + ":" + strconv.Itoa(server.CentralConfigPort) + "/" + nodeid + "/" + basename
+	rawURL := "http://" + server.CentralConfigServer + ":" + strconv.Itoa(server.CentralConfigPort) + "/" + nodeid + "/" + f.CheckID + "/" + basename
 	downloadFile(rawURL, f.FilePath)
 	return nil
 }
 
 //UploadLog upload
-func (f *CheckFileConfig) UploadLog(nodeid string) error {
+func (f *CheckFileConfig) UploadLog(nodeid string, server ServerConfig) error {
 	log.Debugf("Uploading log file to server... related to file: %s", f.FilePath)
+	if len(f.UploadFileAfterCmd) == 0 {
+		return nil
+	}
+
+	extraParams := map[string]string{
+		"nodeid":  nodeid,
+		"checkid": f.CheckID,
+	}
+
+	rawURL := "http://" + server.CentralConfigServer + ":" + strconv.Itoa(server.CentralConfigPort) + "/upload/"
+
+	uploadFile(rawURL, f.UploadFileAfterCmd, extraParams)
 	return nil
 }
 
