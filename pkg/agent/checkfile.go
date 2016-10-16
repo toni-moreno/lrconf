@@ -235,7 +235,7 @@ func (f *CheckFileConfig) IsModified() (string, bool) {
 func (f *CheckFileConfig) DownloadNew(nodeid string, server ServerConfig) error {
 	log.Debugf("Download new file version from server... for file: %s", f.FilePath)
 	basename := filepath.Base(f.FilePath)
-	rawURL := "http://" + server.CentralConfigServer + ":" + strconv.Itoa(server.CentralConfigPort) + "/" + nodeid + "/" + f.CheckID + "/" + basename
+	rawURL := "http://" + server.CentralConfigServer + ":" + strconv.Itoa(server.CentralConfigPort) + "/nodes/" + nodeid + "/" + f.CheckID + "/" + basename
 	downloadFile(rawURL, f.FilePath)
 	return nil
 }

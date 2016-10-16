@@ -190,7 +190,7 @@ func (c *Config) EndConfig() {
 func (c *Config) downloadMainConf() (string, error) {
 	log.Debugf("Download new config file from server..")
 	basename := "lrconf-agent.toml"
-	rawURL := "http://" + c.Server.CentralConfigServer + ":" + strconv.Itoa(c.Server.CentralConfigPort) + "/" + c.NodeID + "/" + basename
+	rawURL := "http://" + c.Server.CentralConfigServer + ":" + strconv.Itoa(c.Server.CentralConfigPort) + "/nodes/" + c.NodeID + "/" + basename
 	newconf := filepath.Join(c.tmpdir, basename)
 	err := downloadFile(rawURL, newconf)
 	return newconf, err
