@@ -37,12 +37,14 @@ mode = "0644"
 
 /*FileCfg type to handle files*/
 type FileCfg struct {
-	Path        string `toml:"path"`
-	Sum         string `toml:"sum"`
-	SumType     string `toml:"sum"`
-	Owner       string `toml:"file_owner"`
-	Mode        string `toml:"file_mode"`
-	CheckAction string `toml:"check_action"`
+	Path    string `toml:"path"`
+	Sum     string `toml:"sum"`
+	SumType string `toml:"sumtype"`
+	Owner   string `toml:"owner"`
+	Mode    string `toml:"mode"`
+	Action  string `toml:"action"`
+	uid     int
+	gid     int
 }
 
 /*CheckGroupConfig  for group files*/
@@ -207,9 +209,17 @@ func (g *CheckGroupConfig) InitCheckGroup() (bool, error) {
 		if len(f.Mode) == 0 {
 			f.Mode = g.GroupMode
 		}
-		if len(f.CheckAction) == 0 {
-			f.CheckAction = "change"
+		if len(f.Action) == 0 {
+			f.Action = "change"
 		}
+		user, err := user.Lookup(f.Owner)
+		if err != nil {
+			log.Errorf("Error on get UID/GID data for user %s", f.Owner)
+		} else {
+			f.uid, _ = strconv.Atoi(user.Uid)
+			f.gid, _ = strconv.Atoi(user.Gid)
+		}
+
 	}
 
 	return true, nil
@@ -290,7 +300,15 @@ func (f *FileCfg) DownloadNew(nodeid string, groupid string, server ServerConfig
 	basename := filepath.Base(f.Path)
 	rawURL := "http://" + server.CentralConfigServer + ":" + strconv.Itoa(server.CentralConfigPort) + "/nodes/" + nodeid + "/" + groupid + "/" + basename
 	downloadFile(rawURL, f.Path)
-	return nil
+	//change owner and permisions
+	var err error
+	if runtime.GOOS != "windows" {
+		perm, _ := strconv.Atoi(f.Mode)
+		err = os.Chmod(f.Path, os.FileMode(perm))
+		return err
+	}
+	err = os.Chown(f.Path, f.uid, f.gid)
+	return err
 }
 
 //UploadLog upload

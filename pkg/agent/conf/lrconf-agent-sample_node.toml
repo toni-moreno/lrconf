@@ -19,25 +19,27 @@ nodeid="samplenodeXX"
   checkcmd = "echo \"check 1 cmd\" >> /tmp/test1.conf.cmd"
   reloadcmd = "echo \"reload 1 cmd\">> /tmp/test1.conf.cmd"
   uploadfileaftercmd= "/tmp/test1.conf.cmd"
-  #defult owner for all files in the group
+  #defult owner for all files in the group if no overrided in the file config section
   groupowner = "developer"
-  #default group for all files in the group
-  groupmode = "0644" 
+  #default group for all files in the group if no overrided in the file config section
+  groupmode = "0644"
 
   [[checkgroup.file]]
     path = "/tmp/testaa1.conf"
     sum = "7c84b9ca4db8400ffda3e36bd0ad27d6"
+##    sumtype supperted ["MD5","SHA1","SHA256", "SHA512"]
 #    sumtype = "MD5"
 #    owner = "developer"
 #    mode = "0644"
-#    action ="changes" #defecto #change
+##    action could be "change" (default) or "delete"
+#    action ="change"
   [[checkgroup.file]]
     path = "/tmp/testaa2.conf"
     sum = "7c84b9ca4db8400ffda3e36bd0ad27d6"
 #    sumtype = "MD5" //por defecto MD5
 #    owner = "developer"
 #    mode = "0644"
-#    action ="changes"
+#    action ="change"
 
 [[checkgroup]]
   checkid = "b"

@@ -239,20 +239,39 @@ func CheckFiles(wg *sync.WaitGroup, cfg *Config) {
 			changed := 0
 			log.Debugf("init review Group: %d : %s ", i, g.CheckID)
 			for _, f := range g.File {
-				//check if exist
-				if exist, _ := f.Exist(); exist == false {
-					log.Infof("file %s has been created  current sum [ %s ]", f.Path, f.Sum)
-					f.DownloadNew(cfg.NodeID, g.CheckID, cfg.Server)
-					changed++
-					continue
-				}
-				lastsum, modified := f.IsModified()
-				if modified == true {
-					log.Infof("file %s has been modified  last sum [ %s ] current sum [ %s ]", f.Path, lastsum, f.Sum)
+				switch f.Action {
+				case "change":
+					//check if exist
+					if exist, _ := f.Exist(); exist == false {
+						f.DownloadNew(cfg.NodeID, g.CheckID, cfg.Server)
+						log.Infof("file %s has been created  current sum [ %s ]", f.Path, f.Sum)
+						changed++
+						continue
+					}
+					lastsum, modified := f.IsModified()
+					if modified == true {
+						log.Infof("file %s has been modified  last sum [ %s ] current sum [ %s ]", f.Path, lastsum, f.Sum)
+						f.Backup()
+						f.DownloadNew(cfg.NodeID, g.CheckID, cfg.Server)
+					}
+				case "delete":
+					if exist, _ := f.Exist(); exist == false {
+						//if delete action and not exist nothing to do here
+						log.Infof("file %s has nothing to do doen't exist", f.Path)
+						continue
+					}
+					log.Infof("file %s should be deleted ", f.Path)
 					f.Backup()
-					f.DownloadNew(cfg.NodeID, g.CheckID, cfg.Server)
-				}
-			}
+					err := os.Remove(f.Path)
+					if err != nil {
+						log.Errorf("ERROR on remove File %s on group %s , error : err %s ", f.Path, g.CheckID, err)
+					}
+				default:
+					log.Warnf("Undefined Action  [%s ] for Group %s and File %s ", f.Action, g.CheckID, f.Path)
+				} //switch
+
+			} //range File
+
 			if changed > 0 {
 				log.Infof("%d files have been changed in the Group [ %s ] procedd to reload , check , upload log", changed, g.CheckID)
 				g.ExecReload()
