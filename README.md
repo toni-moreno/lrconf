@@ -12,6 +12,10 @@ These 2 elemens are focused on
 * keeping local configuration files up-to-date using data stored in the Lrconf-server,
 * reloading applications to pick up new config file changes
 
+#Install lrconf-agent
+
+You can just create a directory to place binary on /opt/lrconf-agent/  and copy (and reconfigure if neede) a minimal config from pkg/agent/conf/lrconf-agent-sample_min.toml to /opt/lrconf-agent/lrconf-agent.toml. The agent itself will download the full lrconf-agent config from the server ( use pkg/agent/conf/lrconf-agent-sample_node.toml as the full configuration config in the server side as described below)
+
 
 #NOTE on lrconf-server
 

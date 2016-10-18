@@ -8,6 +8,9 @@ import (
 	"runtime"
 	//	"path/filepath"
 	"crypto/md5"
+	"crypto/sha1"
+	"crypto/sha256"
+	"crypto/sha512"
 	"errors"
 	"io"
 	"io/ioutil"
@@ -16,30 +19,43 @@ import (
 	"strconv"
 	"time"
 	//"net/url"
+	"os/user"
 	"path/filepath"
 )
 
 /*
-[checkfile]
-file_path = "/opt/collectd/plugin_apache.conf"
-file_sum = "5HGWGGEGWHHE55W5W5"
-file_owner = "apache"
-file_mode = "0644"
+[[checkgroup]]
 check_cmd = "/usr/sbin/httpd -t -c {{.src}}"
 reload_cmd = "/usr/sbin/service apache reload"
 upload_file_after_cmd= "/opt/collectd/logs/collectd.log"
+[[checkgroup.file]]
+path = "/opt/collectd/plugin_apache.conf"
+sum = "5HGWGGEGWHHE55W5W5"
+owner = "apache"
+mode = "0644"
 */
 
-/*CheckFileConfig  is type for file checking*/
-type CheckFileConfig struct {
+/*FileCfg type to handle files*/
+type FileCfg struct {
+	Path    string `toml:"path"`
+	Sum     string `toml:"sum"`
+	SumType string `toml:"sumtype"`
+	Owner   string `toml:"owner"`
+	Mode    string `toml:"mode"`
+	Action  string `toml:"action"`
+	uid     int
+	gid     int
+}
+
+/*CheckGroupConfig  for group files*/
+type CheckGroupConfig struct {
 	CheckID            string
-	FilePath           string `toml:"file_path"`
-	FileSum            string `toml:"file_sum"`
-	FileOwner          string `toml:"file_owner"`
-	FileMode           string `toml:"file_mode"`
 	CheckCmd           string `toml:"check_cmd"`
 	ReloadCmd          string `toml:"reload_cmd"`
 	UploadFileAfterCmd string `toml:"upload_file_after_cmd"`
+	GroupOwner         string `toml:"groupowner"`
+	GroupMode          string `toml:"groupmode"`
+	File               []*FileCfg
 }
 
 //private basic methods for upload/download files from Server
@@ -162,27 +178,59 @@ func execCmd(cmd string) (string, error) {
 
 //Public exported Methods
 
-//InitCheck check if mínimal data is set..
-func (f *CheckFileConfig) InitCheck() (bool, error) {
+//InitCheckGroup check if mínimal data is set..
+func (g *CheckGroupConfig) InitCheckGroup() (bool, error) {
 	//minimal data should be FilePath and FileSum Default Ownser will be current execution user and default filemode will be 0644 for Linux.
 	//File is not needed existing in that case in the next ckeck iteration will be dowloaded
-	if len(f.FilePath) == 0 {
-		return false, errors.New("Needed Filepath parameter not found")
-	}
+	// Init Group
+	u, _ := user.Current()
 
-	if len(f.FileSum) == 0 {
-		return false, errors.New("Needed FileSum parameter not found")
+	if len(g.GroupOwner) == 0 {
+		g.GroupOwner = u.Username
+	}
+	if len(g.GroupMode) == 0 {
+		g.GroupMode = "0755"
+	}
+	//Init files
+	for _, f := range g.File {
+
+		if len(f.Path) == 0 {
+			return false, errors.New("Needed Path parameter not found")
+		}
+		if len(f.Sum) == 0 {
+			return false, errors.New("Needed FileSum parameter not found")
+		}
+		if len(f.SumType) == 0 {
+			f.SumType = "MD5"
+		}
+		if len(f.Owner) == 0 {
+			f.Owner = g.GroupOwner
+		}
+		if len(f.Mode) == 0 {
+			f.Mode = g.GroupMode
+		}
+		if len(f.Action) == 0 {
+			f.Action = "change"
+		}
+		user, err := user.Lookup(f.Owner)
+		if err != nil {
+			log.Errorf("Error on get UID/GID data for user %s", f.Owner)
+		} else {
+			f.uid, _ = strconv.Atoi(user.Uid)
+			f.gid, _ = strconv.Atoi(user.Gid)
+		}
+
 	}
 
 	return true, nil
 }
 
 //Backup  for saving old versio config files
-func (f *CheckFileConfig) Backup() error {
+func (f *FileCfg) Backup() error {
 	timename := time.Now().Format("2006-01-02_15:04:05")
-	backupPath := f.FilePath + "." + timename
-	log.Debugf("Doing backup... for file: %s to : %s", f.FilePath, backupPath)
-	in, err := os.Open(f.FilePath)
+	backupPath := f.Path + "." + timename
+	log.Debugf("Doing backup... for file: %s to : %s", f.Path, backupPath)
+	in, err := os.Open(f.Path)
 	if err != nil {
 		return err
 	}
@@ -205,63 +253,86 @@ func (f *CheckFileConfig) Backup() error {
 }
 
 //Exist to check if current SUM is
-func (f *CheckFileConfig) Exist() (bool, error) {
-	log.Debugf("Checking if file: %s exist...", f.FilePath)
-	if _, err := os.Stat(f.FilePath); os.IsNotExist(err) {
+func (f *FileCfg) Exist() (bool, error) {
+	log.Debugf("Checking if file: %s exist...", f.Path)
+	if _, err := os.Stat(f.Path); os.IsNotExist(err) {
 		return false, err
 	}
 	return true, nil
 }
 
 //IsModified to check if current SUM is
-func (f *CheckFileConfig) IsModified() (string, bool) {
-	log.Infof("Check File modification... for file: %s", f.FilePath)
+func (f *FileCfg) IsModified() (string, bool) {
+	log.Infof("Check File modification... for file: %s", f.Path)
 	//at this point file should exist
-	data, err := ioutil.ReadFile(f.FilePath)
+	data, err := ioutil.ReadFile(f.Path)
 	log.Debug(string(data))
 	if err != nil {
-		return f.FilePath, false
+		return f.Path, false
 	}
-	currentsum := md5.Sum(data)
-	currentsumStr := fmt.Sprintf("%x", currentsum)
+
+	var currentsumStr string
+	switch f.SumType {
+	case "MD5":
+		currentsum := md5.Sum(data)
+		currentsumStr = fmt.Sprintf("%x", currentsum)
+	case "SHA1":
+		currentsum := sha1.Sum(data)
+		currentsumStr = fmt.Sprintf("%x", currentsum)
+	case "SHA256":
+		currentsum := sha256.Sum256(data)
+		currentsumStr = fmt.Sprintf("%x", currentsum)
+	case "SHA512":
+		currentsum := sha512.Sum512(data)
+		currentsumStr = fmt.Sprintf("%x", currentsum)
+	}
+
 	log.Debugf("CURRENT SUM: %s", currentsumStr)
-	if currentsumStr != f.FileSum {
+	if currentsumStr != f.Sum {
 		return currentsumStr, true
 	}
-	return f.FileSum, false
+	return f.Sum, false
 }
 
 //DownloadNew to download the new version of this file
-func (f *CheckFileConfig) DownloadNew(nodeid string, server ServerConfig) error {
-	log.Debugf("Download new file version from server... for file: %s", f.FilePath)
-	basename := filepath.Base(f.FilePath)
-	rawURL := "http://" + server.CentralConfigServer + ":" + strconv.Itoa(server.CentralConfigPort) + "/nodes/" + nodeid + "/" + f.CheckID + "/" + basename
-	downloadFile(rawURL, f.FilePath)
-	return nil
+func (f *FileCfg) DownloadNew(nodeid string, groupid string, server ServerConfig) error {
+	log.Debugf("Download new file version from server... for file: %s", f.Path)
+	basename := filepath.Base(f.Path)
+	rawURL := "http://" + server.CentralConfigServer + ":" + strconv.Itoa(server.CentralConfigPort) + "/nodes/" + nodeid + "/" + groupid + "/" + basename
+	downloadFile(rawURL, f.Path)
+	//change owner and permisions
+	var err error
+	if runtime.GOOS != "windows" {
+		perm, _ := strconv.Atoi(f.Mode)
+		err = os.Chmod(f.Path, os.FileMode(perm))
+		return err
+	}
+	err = os.Chown(f.Path, f.uid, f.gid)
+	return err
 }
 
 //UploadLog upload
-func (f *CheckFileConfig) UploadLog(nodeid string, server ServerConfig) error {
-	log.Debugf("Uploading log file to server... related to file: %s", f.FilePath)
-	if len(f.UploadFileAfterCmd) == 0 {
+func (g *CheckGroupConfig) UploadLog(nodeid string, server ServerConfig) error {
+	log.Debugf("Uploading log file to server... related to Group: %s", g.CheckID)
+	if len(g.UploadFileAfterCmd) == 0 {
 		return nil
 	}
 
 	extraParams := map[string]string{
 		"nodeid":  nodeid,
-		"checkid": f.CheckID,
+		"checkid": g.CheckID,
 	}
 
 	rawURL := "http://" + server.CentralConfigServer + ":" + strconv.Itoa(server.CentralConfigPort) + "/upload/"
 
-	uploadFile(rawURL, f.UploadFileAfterCmd, extraParams)
+	uploadFile(rawURL, g.UploadFileAfterCmd, extraParams)
 	return nil
 }
 
 //ExecCheck upload
-func (f *CheckFileConfig) ExecCheck() (bool, error) {
-	log.Debugf("Executing Check Command related to file: %s", f.FilePath)
-	out, err := execCmd(f.CheckCmd)
+func (g *CheckGroupConfig) ExecCheck() (bool, error) {
+	log.Debugf("Executing Check Command related to Group: %s", g.CheckID)
+	out, err := execCmd(g.CheckCmd)
 	log.Infof("CMD OUT: %s", out)
 	if err != nil {
 		log.Error(err)
@@ -271,9 +342,9 @@ func (f *CheckFileConfig) ExecCheck() (bool, error) {
 }
 
 //ExecReload upload
-func (f *CheckFileConfig) ExecReload() (bool, error) {
-	log.Debugf("Executing Reload Command related to file: %s", f.FilePath)
-	out, err := execCmd(f.ReloadCmd)
+func (g *CheckGroupConfig) ExecReload() (bool, error) {
+	log.Debugf("Executing Reload Command related to Group: %s", g.CheckID)
+	out, err := execCmd(g.ReloadCmd)
 	log.Infof("CMD OUT: %s", out)
 	if err != nil {
 		log.Error(err)
