@@ -30,11 +30,12 @@ type ServerConfig struct {
 
 //Config has all configurations
 type Config struct {
-	NodeID     string `toml:"nodeid"`
-	tmpdir     string
-	General    GeneralConfig
-	Server     ServerConfig
-	CheckFiles map[string]*CheckFileConfig
+	NodeID  string `toml:"nodeid"`
+	tmpdir  string
+	General GeneralConfig
+	Server  ServerConfig
+	//CheckFiles map[string]*CheckFileConfig
+	CheckGroup []*CheckGroupConfig
 }
 
 var (
@@ -153,12 +154,12 @@ func init() {
 
 	//CHECK IF FILES ARE OK
 
-	for id, f := range cfg.CheckFiles {
-		if ok, err := f.InitCheck(); ok != true {
-			log.Warningf("Error in config file file %s has errors: %s: ", id, err)
-			delete(cfg.CheckFiles, id)
+	for i, g := range cfg.CheckGroup {
+		if ok, err := g.InitCheckGroup(); ok != true {
+			log.Warningf("Error in config  group %s has errors: %s: ", i, err)
+			cfg.CheckGroup = append(cfg.CheckGroup[:i], cfg.CheckGroup[i+1:]...)
 		}
-		log.Infof("File Check OK : %s : %s", id, f.FilePath)
+		log.Infof("Group Check OK : %s : %s", i, g.CheckID)
 	}
 
 }
@@ -181,9 +182,7 @@ func (c *Config) InitConfig() {
 //EndConfig default values
 func (c *Config) EndConfig() {
 	//set checkid for each check
-	for key, val := range c.CheckFiles {
-		val.CheckID = key
-	}
+
 }
 
 //DownloadNew to download the new version of this file
@@ -236,26 +235,29 @@ func CheckFiles(wg *sync.WaitGroup, cfg *Config) {
 			log.Warningf(" I can not download the agent conf from remoteserver: %s", err)
 		}
 		//Check Main Process after config reload
-		for id, f := range cfg.CheckFiles {
-			//log.Debug("DATA: %+v", *f)
-			log.Debugf("init review file: %s with path %s", id, f.FilePath)
-			//check if file exist
-			if exist, _ := f.Exist(); exist == false {
-				log.Infof("file %s has been created  current sum [ %s ]", f.FilePath, f.FileSum)
-				f.DownloadNew(cfg.NodeID, cfg.Server)
-				f.ExecReload()
-				f.ExecCheck()
-				f.UploadLog(cfg.NodeID, cfg.Server)
-				continue
+		for i, g := range cfg.CheckGroup {
+			changed := 0
+			log.Debugf("init review Group: %d : %s ", i, g.CheckID)
+			for _, f := range g.File {
+				//check if exist
+				if exist, _ := f.Exist(); exist == false {
+					log.Infof("file %s has been created  current sum [ %s ]", f.Path, f.Sum)
+					f.DownloadNew(cfg.NodeID, g.CheckID, cfg.Server)
+					changed++
+					continue
+				}
+				lastsum, modified := f.IsModified()
+				if modified == true {
+					log.Infof("file %s has been modified  last sum [ %s ] current sum [ %s ]", f.Path, lastsum, f.Sum)
+					f.Backup()
+					f.DownloadNew(cfg.NodeID, g.CheckID, cfg.Server)
+				}
 			}
-			lastsum, modified := f.IsModified()
-			if modified == true {
-				log.Infof("file %s has been modified  last sum [ %s ] current sum [ %s ]", f.FilePath, lastsum, f.FileSum)
-				f.Backup()
-				f.DownloadNew(cfg.NodeID, cfg.Server)
-				f.ExecReload()
-				f.ExecCheck()
-				f.UploadLog(cfg.NodeID, cfg.Server)
+			if changed > 0 {
+				log.Infof("%d files have been changed in the Group [ %s ] procedd to reload , check , upload log", changed, g.CheckID)
+				g.ExecReload()
+				g.ExecCheck()
+				g.UploadLog(cfg.NodeID, cfg.Server)
 			}
 		}
 	LOOP:

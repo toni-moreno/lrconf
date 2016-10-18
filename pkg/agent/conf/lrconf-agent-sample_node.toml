@@ -1,0 +1,61 @@
+
+#node id at witch will be identified this node
+nodeid="samplenodeXX"
+
+[general]
+ logdir = "./log"
+ loglevel = "debug"
+
+[server]
+  #cental server config host
+  centralconfigserver = "localhost"
+  #cental server config port
+  centralconfigport = 1234
+  #reload config in seconds
+  reloadconfig = 10
+
+[[checkgroup]]
+  checkid = "a"
+  checkcmd = "echo \"check 1 cmd\" >> /tmp/test1.conf.cmd"
+  reloadcmd = "echo \"reload 1 cmd\">> /tmp/test1.conf.cmd"
+  uploadfileaftercmd= "/tmp/test1.conf.cmd"
+  #defult owner for all files in the group
+  groupowner = "developer"
+  #default group for all files in the group
+  groupmode = "0644" 
+
+  [[checkgroup.file]]
+    path = "/tmp/testaa1.conf"
+    sum = "7c84b9ca4db8400ffda3e36bd0ad27d6"
+#    sumtype = "MD5"
+#    owner = "developer"
+#    mode = "0644"
+#    action ="changes" #defecto #change
+  [[checkgroup.file]]
+    path = "/tmp/testaa2.conf"
+    sum = "7c84b9ca4db8400ffda3e36bd0ad27d6"
+#    sumtype = "MD5" //por defecto MD5
+#    owner = "developer"
+#    mode = "0644"
+#    action ="changes"
+
+[[checkgroup]]
+  checkid = "b"
+  checkcmd = "echo \"check 2 cmd\" >> /tmp/test2.conf.cmd"
+  reloadcmd = "echo \"reload 2 cmd\">> /tmp/test2.conf.cmd"
+  uploadfileaftercmd= "/tmp/test2.conf.cmd"
+
+  [[checkgroup.file]]
+    path = "/tmp/testb1.conf"
+    sum = "8ba1a01ec60ca736b50cae16c4bbda38"
+    sumtype = "MD5"
+    owner = "developer"
+    mode = "0644"
+    checkaction = "delete"
+  [[checkgroup.file]]
+    path = "/tmp/testb2.conf"
+    sum = "8ba1a01ec60ca736b50cae16c4bbda38"
+    sumtype = "MD5"
+    owner = "developer"
+    mode = "0644"
+    checkaction = "delete"
