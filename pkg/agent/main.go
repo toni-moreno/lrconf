@@ -243,16 +243,27 @@ func CheckFiles(wg *sync.WaitGroup, cfg *Config) {
 				case "change":
 					//check if exist
 					if exist, _ := f.Exist(); exist == false {
-						f.DownloadNew(cfg.NodeID, g.CheckID, cfg.Server)
-						log.Infof("file %s has been created  current sum [ %s ]", f.Path, f.Sum)
-						changed++
+						err := f.DownloadNew(cfg.NodeID, g.CheckID, cfg.Server)
+						if err == nil {
+							log.Infof("file %s has been created  current sum [ %s ]", f.Path, f.Sum)
+							changed++
+						} else {
+							log.Errorf("Error on download file %s from group %s ERROR: %s", f.Path, g.CheckID, err)
+						}
+
 						continue
 					}
 					lastsum, modified := f.IsModified()
 					if modified == true {
 						log.Infof("file %s has been modified  last sum [ %s ] current sum [ %s ]", f.Path, lastsum, f.Sum)
 						f.Backup()
-						f.DownloadNew(cfg.NodeID, g.CheckID, cfg.Server)
+						err := f.DownloadNew(cfg.NodeID, g.CheckID, cfg.Server)
+						if err == nil {
+							log.Infof("file %s on group %s has been updated  current sum [ %s ]", f.Path, g.CheckID, f.Sum)
+							changed++
+						} else {
+							log.Errorf("Error on download file %s from group %s ERROR: %s", f.Path, g.CheckID, err)
+						}
 					}
 				case "delete":
 					if exist, _ := f.Exist(); exist == false {
@@ -265,6 +276,9 @@ func CheckFiles(wg *sync.WaitGroup, cfg *Config) {
 					err := os.Remove(f.Path)
 					if err != nil {
 						log.Errorf("ERROR on remove File %s on group %s , error : err %s ", f.Path, g.CheckID, err)
+					} else {
+						log.Infof("File %s on group %s , have been removed Successfully", f.Path, g.CheckID)
+						changed++
 					}
 				default:
 					log.Warnf("Undefined Action  [%s ] for Group %s and File %s ", f.Action, g.CheckID, f.Path)
